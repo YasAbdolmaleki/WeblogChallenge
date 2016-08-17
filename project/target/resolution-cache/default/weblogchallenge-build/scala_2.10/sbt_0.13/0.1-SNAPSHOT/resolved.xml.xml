@@ -4,7 +4,7 @@
 		module="weblogchallenge-build"
 		revision="0.1-SNAPSHOT"
 		status="integration"
-		publication="20160807083454"
+		publication="20160810134831"
 		e:sbtVersion="0.13" e:scalaVersion="2.10"
 	>
 		<description>

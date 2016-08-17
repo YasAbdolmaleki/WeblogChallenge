@@ -1,0 +1,13 @@
+----------------------------------------------------------------
+Wed Aug 17 11:06:05 EDT 2016:
+Booting Derby version The Apache Software Foundation - Apache Derby - 10.10.1.1 - (1458268): instance a816c00e-0156-9909-b2b6-0000033b3d30 
+on database directory /home/sparkdev/challenge/WeblogChallenge/metastore_db with class loader sun.misc.Launcher$AppClassLoader@41975e01 
+Loaded from file:/home/sparkdev/.ivy2/cache/org.apache.derby/derby/jars/derby-10.10.1.1.jar
+java.vendor=Oracle Corporation
+java.runtime.version=1.8.0_91-8u91-b14-0ubuntu4~15.10.1-b14
+user.dir=/home/sparkdev/challenge/WeblogChallenge
+os.name=Linux
+os.arch=amd64
+os.version=4.2.0-41-generic
+derby.system.home=null
+Database Class Loader started - derby.database.classpath=''
