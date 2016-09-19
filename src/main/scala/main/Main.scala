@@ -1,11 +1,11 @@
 package main
 
 import org.apache.spark.sql.hive.HiveContext
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.{SparkConf, SparkContext}
 import org.joda.time.DateTime
 import org.joda.time.format.DateTimeFormat
 
-case class Log(ip: String, timeMin: String, timeMax: String, backend:String )
+case class Log(ip: String, time: String)
 
 object Main extends App{
 
@@ -20,30 +20,25 @@ object Main extends App{
   import sqlContext.implicits._
 
   val rdd = logFile.map( line => line.split("\\s(?=([^\"]*\"[^\"]*\")*[^\"]*$)",-1))
-      .map(eventRecord => {
+    .map(eventRecord => {
       val datetime = DateTimeFormat.forPattern("yyyy-MM-dd\'T\'HH:mm:ss.SSSSSSZ").parseDateTime(eventRecord(0))
       val time  = DateTime.parse(eventRecord(0), DateTimeFormat.forPattern("yyyy-MM-dd\'T\'HH:mm:ss.SSSSSSZ")).toString("hh:mm:ss")
       val ipAddress = eventRecord(2)
-      val serverAddress = eventRecord(3)
-      Log(ipAddress, time, time, serverAddress )
+      Log(ipAddress, time )
     })
 
   var logTable = rdd.toDF()
   logTable.registerTempTable("logTable")
 
-  val deltTimeTable = sqlContext.sql("""SELECT  T1.ip,
-                                          T1.timeMin,
-                                          T1.backend,
-                                          COALESCE((MIN(unix_timestamp(T2.timeMin, "hh:mm:ss")) -
-                                            unix_timestamp(T1.timeMin,"hh:mm:ss"))/60,0) AS TimeDiff
-                                 FROM    logTable T1
-                                         LEFT JOIN logTable T2
-                                             ON T1.ip = T2.ip AND (unix_timestamp(T2.timeMin, "hh:mm:ss") > unix_timestamp(T1.timeMin, "hh:mm:ss"))
-                                 GROUP BY T1.ip, T1.timeMin, T1.backend
-                                 ORDER BY T1.ip asc""")
-  deltTimeTable.registerTempTable("deltaTime")
 
-  val aggIP = sqlContext.sql("""SELECT ip,  backend from deltaTime where TimeDiff <= 15 Group by ip, backend""")
-  aggIP.show()
+  val sessionize = sqlContext.sql("""
+  select a.ip, a.time,
+  cast(sum(a.new_event_boundary) OVER (PARTITION BY a.ip ORDER BY a.time) as varchar) as session_id from
+  (select ip, time,
+  case when UNIX_TIMESTAMP(time, "hh:mm:ss") - lag(UNIX_TIMESTAMP(time, "hh:mm:ss")) OVER (PARTITION BY ip ORDER BY time ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING) > 15 * 60 then 1 ELSE 0 END as new_event_boundary
+  from logTable) a""")
+
+  sessionize.registerTempTable("sessionizedTable")
+  sessionize.show()
 
 }
