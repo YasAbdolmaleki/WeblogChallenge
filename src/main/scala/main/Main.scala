@@ -33,12 +33,25 @@ object Main extends App{
 
   val sessionize = sqlContext.sql("""
   select a.ip, a.time,
-  cast(sum(a.new_event_boundary) OVER (PARTITION BY a.ip ORDER BY a.time) as varchar) as session_id from
+  cast(sum(a.new_event_boundary) OVER (PARTITION BY a.ip ORDER BY a.time) as varchar) as session from
   (select ip, time,
-  case when UNIX_TIMESTAMP(time, "hh:mm:ss") - lag(UNIX_TIMESTAMP(time, "hh:mm:ss")) OVER (PARTITION BY ip ORDER BY time ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING) > 15 * 60 then 1 ELSE 0 END as new_event_boundary
+  case when UNIX_TIMESTAMP(time, "hh:mm:ss") - lag(UNIX_TIMESTAMP(time, "hh:mm:ss")) OVER (PARTITION BY ip ORDER BY time ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING) > 15 * 60
+  then 1
+  ELSE 0
+  END as new_event_boundary
   from logTable) a""")
 
   sessionize.registerTempTable("sessionizedTable")
-  sessionize.show()
+  //sessionize.show()
+
+  val sessionAverage = sqlContext.sql("""
+    select (sum(a.duration)/count(*)) as average_session_time
+    from (Select ip, session,
+    (Max(UNIX_TIMESTAMP(time, "hh:mm:ss"))-Min(UNIX_TIMESTAMP(time, "hh:mm:ss"))) as duration
+    from sessionizedTable
+    group by ip, session) a """)
+
+  sessionAverage.registerTempTable("sessAverageTable")
+  sessionAverage.show()
 
 }
