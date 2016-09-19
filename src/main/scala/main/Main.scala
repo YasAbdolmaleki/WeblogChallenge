@@ -5,7 +5,7 @@ import org.apache.spark.{SparkConf, SparkContext}
 import org.joda.time.DateTime
 import org.joda.time.format.DateTimeFormat
 
-case class Log(ip: String, time: String)
+case class Log(ip: String, time: String, url: String)
 
 object Main extends App{
 
@@ -24,17 +24,18 @@ object Main extends App{
       val datetime = DateTimeFormat.forPattern("yyyy-MM-dd\'T\'HH:mm:ss.SSSSSSZ").parseDateTime(eventRecord(0))
       val time  = DateTime.parse(eventRecord(0), DateTimeFormat.forPattern("yyyy-MM-dd\'T\'HH:mm:ss.SSSSSSZ")).toString("hh:mm:ss")
       val ipAddress = eventRecord(2)
-      Log(ipAddress, time )
+      val url = eventRecord(11)
+      Log(ipAddress, time, url)
     })
 
   var logTable = rdd.toDF()
   logTable.registerTempTable("logTable")
 
-
   val sessionize = sqlContext.sql("""
   select a.ip, a.time,
-  cast(sum(a.new_event_boundary) OVER (PARTITION BY a.ip ORDER BY a.time) as varchar) as session from
-  (select ip, time,
+  cast(sum(a.new_event_boundary) OVER (PARTITION BY a.ip ORDER BY a.time) as varchar) as session,
+  a.url
+  from (select ip, time, url,
   case when UNIX_TIMESTAMP(time, "hh:mm:ss") - lag(UNIX_TIMESTAMP(time, "hh:mm:ss")) OVER (PARTITION BY ip ORDER BY time ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING) > 15 * 60
   then 1
   ELSE 0
@@ -53,5 +54,14 @@ object Main extends App{
 
   sessionAverage.registerTempTable("sessAverageTable")
   sessionAverage.show()
+
+
+  val uniqueURL = sqlContext.sql("""select b.ip, b.session, count(b.url) as uniqueURL
+                                     from (select ip, session, url from sessionizedTable group by ip, session, url) b
+                                  group by b.ip, b.session""")
+
+  uniqueURL.registerTempTable("uniqueURLTable")
+  uniqueURL.show()
+
 
 }
