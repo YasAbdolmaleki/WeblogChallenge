@@ -9,19 +9,19 @@ case class Log(ip: String, time: String, url: String)
 
 object Main extends App{
 
+  val fixed_time_window = 15
   val conf = new SparkConf()
     .setMaster("local[*]")  //take all available cores
     .setAppName("WeblogChallenge")
   val sc = new SparkContext(conf)
   val logFile = sc.textFile("/home/sparkdev/challenge/WeblogChallenge/data/2015_07_22_mktplace_shop_web_log_sample.log") //FIXME: HARDCODED PATH  - RDD[ String ]
-
   val sqlContext = new HiveContext(sc)
 
   import sqlContext.implicits._
 
-  val rdd = logFile.map( line => line.split("\\s(?=([^\"]*\"[^\"]*\")*[^\"]*$)",-1))
+  // parse log file - split regex
+  val rdd = logFile.map( line => line.split("\\s(?=([^\"]*\"[^\"]*\")*[^\"]*$)"))
     .map(eventRecord => {
-      val datetime = DateTimeFormat.forPattern("yyyy-MM-dd\'T\'HH:mm:ss.SSSSSSZ").parseDateTime(eventRecord(0))
       val time  = DateTime.parse(eventRecord(0), DateTimeFormat.forPattern("yyyy-MM-dd\'T\'HH:mm:ss.SSSSSSZ")).toString("hh:mm:ss")
       val ipAddress = eventRecord(2)
       val url = eventRecord(11)
@@ -31,37 +31,63 @@ object Main extends App{
   var logTable = rdd.toDF()
   logTable.registerTempTable("logTable")
 
-  val sessionize = sqlContext.sql("""
-  select a.ip, a.time,
-  cast(sum(a.new_event_boundary) OVER (PARTITION BY a.ip ORDER BY a.time) as varchar) as session,
-  a.url
-  from (select ip, time, url,
-  case when UNIX_TIMESTAMP(time, "hh:mm:ss") - lag(UNIX_TIMESTAMP(time, "hh:mm:ss")) OVER (PARTITION BY ip ORDER BY time ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING) > 15 * 60
-  then 1
-  ELSE 0
-  END as new_event_boundary
-  from logTable) a""")
+
+  /**
+    * 1) Sessionize the web log by IP
+    *
+  **/
+  val sessionize = sqlContext.sql("""select l.ip, l.time,
+                                    cast(sum(l.deltaT) over (partition BY l.ip ORDER BY l.time) as varchar) as session, l.url
+                                    from (select ip, time, url,
+                                      case when unix_timestamp(time, "hh:mm:ss") - lag(unix_timestamp(time, "hh:mm:ss"))
+                                        over (partition BY ip ORDER BY time ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING) > """ + fixed_time_window + """ * 60
+                                      then 1
+                                      else 0
+                                      end as deltaT
+                                      from logTable) l""")
 
   sessionize.registerTempTable("sessionizedTable")
-  //sessionize.show()
+  sessionize.show()
 
-  val sessionAverage = sqlContext.sql("""
-    select (sum(a.duration)/count(*)) as average_session_time
-    from (Select ip, session,
-    (Max(UNIX_TIMESTAMP(time, "hh:mm:ss"))-Min(UNIX_TIMESTAMP(time, "hh:mm:ss"))) as duration
-    from sessionizedTable
-    group by ip, session) a """)
+
+  /**
+    * 2) Determine the average session time
+    *
+  **/
+  val sessionAverage = sqlContext.sql("""select (sum(sa.duration)/count(*)) as average_session_time
+                                          from (select ip, session,
+                                            (max(unix_timestamp(time, "hh:mm:ss"))-min(unix_timestamp(time, "hh:mm:ss"))) as duration
+                                            from sessionizedTable
+                                            group by ip, session) sa""")
 
   sessionAverage.registerTempTable("sessAverageTable")
   sessionAverage.show()
 
 
-  val uniqueURL = sqlContext.sql("""select b.ip, b.session, count(b.url) as uniqueURL
-                                     from (select ip, session, url from sessionizedTable group by ip, session, url) b
-                                  group by b.ip, b.session""")
+  /**
+    * 3) Determine unique URL visits per session
+    *
+  **/
+  val uniqueURL = sqlContext.sql("""select s.ip, s.session, count(s.url) as uniqueURL
+                                      from (select ip, session, url from sessionizedTable group by ip, session, url) s
+                                      group by s.ip, s.session""")
 
   uniqueURL.registerTempTable("uniqueURLTable")
   uniqueURL.show()
 
 
+  /**
+    * 4) Find the most engaged users
+    *
+  **/
+  val longestSession = sqlContext.sql("""select uu.ip, max(uu.duration) as longestSession
+                                            from(Select ip, session, (max(unix_timestamp(time, "hh:mm:ss"))-min(unix_timestamp(time, "hh:mm:ss"))) as duration
+                                              from sessionizedTable
+                                              group by ip, session) uu
+                                            group by uu.ip
+                                            order by longestSession desc
+                                            limit 3""")
+
+  longestSession.registerTempTable("longestSessionTable")
+  longestSession.show()
 }
